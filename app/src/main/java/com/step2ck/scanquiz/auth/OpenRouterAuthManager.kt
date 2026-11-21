@@ -6,6 +6,7 @@ import android.net.Uri
 import android.util.Base64
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.step2ck.scanquiz.debug.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -43,6 +44,7 @@ class OpenRouterAuthManager(private val context: Context) {
     companion object {
         private const val PREF_API_KEY = "openrouter_api_key"
         private const val PREF_CODE_VERIFIER = "pkce_code_verifier"
+        private const val PREF_CUSTOM_MODEL = "custom_model"
         const val REDIRECT_URI = "step2ck://oauth-callback"
         const val AUTH_URL = "https://openrouter.ai/auth"
         const val TOKEN_EXCHANGE_URL = "https://openrouter.ai/api/v1/auth/keys"
@@ -128,7 +130,10 @@ class OpenRouterAuthManager(private val context: Context) {
     }
 
     fun saveApiKey(apiKey: String) {
-        securePrefs.edit().putString(PREF_API_KEY, apiKey.trim()).apply()
+        val trimmed = apiKey.trim()
+        securePrefs.edit().putString(PREF_API_KEY, trimmed).apply()
+        val masked = if (trimmed.length > 8) "${trimmed.take(6)}...${trimmed.takeLast(4)}" else "••••"
+        AppLogger.d("AUTH", "OpenRouter API Key saved: $masked (length ${trimmed.length})")
     }
 
     fun getApiKey(): String? {
@@ -140,8 +145,25 @@ class OpenRouterAuthManager(private val context: Context) {
         return !key.isNullOrBlank()
     }
 
+    fun getCustomModel(): String? {
+        return securePrefs.getString(PREF_CUSTOM_MODEL, null)
+    }
+
+    fun setCustomModel(model: String?) {
+        if (model.isNullOrBlank()) {
+            securePrefs.edit().remove(PREF_CUSTOM_MODEL).apply()
+            AppLogger.d("AUTH", "Model priority reset to default chain")
+        } else {
+            val trimmed = model.trim()
+            securePrefs.edit().putString(PREF_CUSTOM_MODEL, trimmed).apply()
+            AppLogger.d("AUTH", "Preferred model set to: $trimmed")
+        }
+    }
+
     fun clearAuth() {
         securePrefs.edit().clear().apply()
+        AppLogger.d("AUTH", "All authentication credentials cleared.")
     }
 }
+
 

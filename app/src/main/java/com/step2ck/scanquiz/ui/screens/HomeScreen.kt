@@ -10,6 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -30,6 +31,7 @@ fun HomeScreen(
     recentQuizzes: List<QuizEntity>,
     onConnectOpenRouter: () -> Unit,
     onSaveManualApiKey: (String) -> Unit = {},
+    onOpenSettings: () -> Unit = {},
     onStartScan: () -> Unit,
     onOpenPaywall: () -> Unit,
     onSelectRecentQuiz: (Long) -> Unit
@@ -122,13 +124,17 @@ fun HomeScreen(
                     } else {
                         OutlinedButton(
                             onClick = onOpenPaywall,
-                            modifier = Modifier.padding(end = 8.dp),
+                            modifier = Modifier.padding(end = 4.dp),
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                         ) {
                             Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(14.dp))
                             Spacer(Modifier.width(4.dp))
                             Text("Upgrade", fontSize = 12.sp)
                         }
+                    }
+
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(Icons.Default.Settings, contentDescription = "Settings & Logs")
                     }
                 }
             )

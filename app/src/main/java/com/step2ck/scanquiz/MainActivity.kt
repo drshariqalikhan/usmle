@@ -1,5 +1,8 @@
 package com.step2ck.scanquiz
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -9,14 +12,20 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Error
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
 import com.step2ck.scanquiz.auth.OpenRouterAuthManager
 import com.step2ck.scanquiz.auth.QuotaInfo
@@ -44,7 +53,8 @@ enum class AppScreen {
     CONFIRMATION,
     EXAM_PLAYER,
     SCORECARD,
-    PRO_PAYWALL
+    PRO_PAYWALL,
+    SETTINGS
 }
 
 class MainActivity : ComponentActivity() {
@@ -70,6 +80,7 @@ class MainActivity : ComponentActivity() {
     private var activeScorecard by mutableStateOf<QuizScorecard?>(null)
     private var examTitle by mutableStateOf("USMLE Step 2 CK Examination")
     private var examQuestions by mutableStateOf<List<com.step2ck.scanquiz.quiz.QuestionModel>>(emptyList())
+    private var activeErrorDetails by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -118,9 +129,19 @@ class MainActivity : ComponentActivity() {
                                 Toast.makeText(this@MainActivity, "OpenRouter API Key saved!", Toast.LENGTH_SHORT).show()
                                 refreshQuota()
                             },
+                            onOpenSettings = { currentScreen = AppScreen.SETTINGS },
                             onStartScan = { launchDocumentScanner() },
                             onOpenPaywall = { currentScreen = AppScreen.PRO_PAYWALL },
                             onSelectRecentQuiz = { quizId -> loadSavedQuiz(quizId) }
+                        )
+
+                        AppScreen.SETTINGS -> SettingsScreen(
+                            authManager = authManager,
+                            quotaManager = quotaManager,
+                            onBack = {
+                                refreshQuota()
+                                currentScreen = AppScreen.HOME
+                            }
                         )
 
                         AppScreen.CONFIRMATION -> activeScanSummary?.let { summary ->
@@ -167,6 +188,62 @@ class MainActivity : ComponentActivity() {
                             },
                             onRestorePurchase = {
                                 Toast.makeText(this, "No previous purchases found.", Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                    }
+
+                    activeErrorDetails?.let { errText ->
+                        AlertDialog(
+                            onDismissRequest = { activeErrorDetails = null },
+                            icon = { Icon(Icons.Default.Error, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                            title = { Text("Quiz Generation Error") },
+                            text = {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text(
+                                        text = "OpenRouter returned an error. Tap 'Copy Error' to paste it into chat, or 'View Logs' for details:",
+                                        fontSize = 13.sp
+                                    )
+                                    Surface(
+                                        color = Color(0xFF0F172A),
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(max = 220.dp)
+                                    ) {
+                                        Text(
+                                            text = errText,
+                                            color = Color(0xFFF87171),
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 11.sp,
+                                            modifier = Modifier
+                                                .padding(10.dp)
+                                                .verticalScroll(rememberScrollState())
+                                        )
+                                    }
+                                }
+                            },
+                            confirmButton = {
+                                Button(onClick = {
+                                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    val clip = ClipData.newPlainText("Step2CK Error", errText)
+                                    clipboard.setPrimaryClip(clip)
+                                    Toast.makeText(this@MainActivity, "Error details copied!", Toast.LENGTH_SHORT).show()
+                                }) {
+                                    Text("Copy Error")
+                                }
+                            },
+                            dismissButton = {
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    OutlinedButton(onClick = {
+                                        activeErrorDetails = null
+                                        currentScreen = AppScreen.SETTINGS
+                                    }) {
+                                        Text("View Logs")
+                                    }
+                                    TextButton(onClick = { activeErrorDetails = null }) {
+                                        Text("Dismiss")
+                                    }
+                                }
                             }
                         )
                     }
@@ -252,11 +329,8 @@ class MainActivity : ComponentActivity() {
                 examQuestions = validatedQuiz.toQuestionModels()
                 currentScreen = AppScreen.EXAM_PLAYER
             } else {
-                Toast.makeText(
-                    this@MainActivity,
-                    "Quiz Generation Error: ${result.exceptionOrNull()?.message}",
-                    Toast.LENGTH_LONG
-                ).show()
+                val errMsg = result.exceptionOrNull()?.message ?: "Unknown error"
+                activeErrorDetails = errMsg
             }
         }
     }

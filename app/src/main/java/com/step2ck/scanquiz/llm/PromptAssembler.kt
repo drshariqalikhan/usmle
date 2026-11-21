@@ -32,9 +32,36 @@ CRITICAL RULES:
    - "source_type": Must be one of ["TEXT", "TABLE", "FIGURE"].
    - "source_label": Specific heading, table name, or figure title tested (e.g., "Table 4-2: Antihypertensive Therapy in Pregnancy", "Section: Acute Aortic Dissection").
 
-4. OUTPUT FORMAT:
-   - Return a single, valid raw JSON object matching the requested schema.
-   - Do NOT wrap in markdown code fences (no ```json or ```). Return pure JSON only.
+4. REQUIRED JSON OUTPUT FORMAT:
+   Return a single, valid raw JSON object matching EXACTLY this structure with no markdown backticks:
+{
+  "quiz_title": "USMLE Step 2 CK Clinical Vignette Quiz",
+  "questions": [
+    {
+      "id": 1,
+      "source_type": "TEXT",
+      "source_label": "Section: Acute Aortic Dissection",
+      "subtopic": "Cardiovascular Emergencies",
+      "vignette": "A 58-year-old male presents to the emergency department with sudden-onset, severe tearing chest pain radiating to the back. Blood pressure is 185/95 mm Hg in right arm and 150/85 mm Hg in left arm. Pulse is 102/min. Cardiopulmonary examination reveals early diastolic decrescendo murmur.",
+      "question_stem": "Which of the following is the most appropriate initial pharmacological management?",
+      "options": {
+        "A": "Intravenous beta-blocker therapy",
+        "B": "Sublingual nitroglycerin monotherapy",
+        "C": "Immediate thrombolysis with tissue plasminogen activator",
+        "D": "High-dose aspirin and clopidogrel",
+        "E": "Intravenous unfractionated heparin bolus"
+      },
+      "correct_answer": "A",
+      "explanations": {
+        "A": "Intravenous beta-blockade reduces aortic wall shear stress by controlling heart rate and blood pressure.",
+        "B": "Nitroglycerin without beta-blockade causes reflex tachycardia.",
+        "C": "Thrombolysis is strictly contraindicated in dissection.",
+        "D": "Antiplatelet agents do not treat acute aortic dissection.",
+        "E": "Anticoagulation can cause fatal hemorrhage in aortic dissection."
+      }
+    }
+  ]
+}
 """.trimIndent()
 
     fun buildUserMessage(

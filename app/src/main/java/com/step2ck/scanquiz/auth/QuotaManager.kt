@@ -58,6 +58,7 @@ class QuotaManager(
         val apiKey = authManager.getApiKey()
             ?: return@withContext Result.failure(IllegalStateException("No OpenRouter API key found. Connect OpenRouter first."))
 
+        com.step2ck.scanquiz.debug.AppLogger.d("QUOTA", "Checking quota at https://openrouter.ai/api/v1/key...")
         try {
             val request = Request.Builder()
                 .url("https://openrouter.ai/api/v1/key")
@@ -71,9 +72,11 @@ class QuotaManager(
             val respBody = response.body?.string() ?: ""
 
             if (!response.isSuccessful) {
+                com.step2ck.scanquiz.debug.AppLogger.e("QUOTA", "Quota check failed HTTP ${response.code}: $respBody")
                 return@withContext Result.failure(Exception("Quota check failed HTTP ${response.code}: $respBody"))
             }
 
+            com.step2ck.scanquiz.debug.AppLogger.d("QUOTA", "Quota HTTP 200 OK: $respBody")
             val root = JSONObject(respBody)
             val data = root.optJSONObject("data")
                 ?: return@withContext Result.failure(Exception("Malformed quota response: missing 'data'"))

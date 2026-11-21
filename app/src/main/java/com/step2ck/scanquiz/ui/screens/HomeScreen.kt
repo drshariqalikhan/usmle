@@ -12,7 +12,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -34,8 +34,8 @@ fun HomeScreen(
     onOpenPaywall: () -> Unit,
     onSelectRecentQuiz: (Long) -> Unit
 ) {
-    var showKeyDialog by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-    var inputKey by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
+    var showKeyDialog by remember { mutableStateOf(false) }
+    var inputKey by remember { mutableStateOf("") }
 
     if (showKeyDialog) {
         AlertDialog(

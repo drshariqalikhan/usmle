@@ -12,7 +12,7 @@ import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
  * Wraps Google Play Services ML Kit Document Scanner.
  * Enforces hard architectural guardrail: 1 to 8 pages limit per scan session.
  */
-class DocumentScannerManager(activity: Activity) {
+class DocumentScannerManager(private val activity: Activity) {
 
     companion object {
         const val MAX_PAGE_LIMIT = 8 // Hard constraint: 1 to 8 pages per quiz
@@ -30,7 +30,7 @@ class DocumentScannerManager(activity: Activity) {
     private val scanner: GmsDocumentScanner = GmsDocumentScanning.getClient(scannerOptions)
 
     fun getStartScanIntent(onSuccess: (IntentSenderRequest) -> Unit, onFailure: (Exception) -> Unit) {
-        scanner.getStartScanIntent(scannerOptions)
+        scanner.getStartScanIntent(activity)
             .addOnSuccessListener { intentSender: IntentSender ->
                 val request = IntentSenderRequest.Builder(intentSender).build()
                 onSuccess(request)

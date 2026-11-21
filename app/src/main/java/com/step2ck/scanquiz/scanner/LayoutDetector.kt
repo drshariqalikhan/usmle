@@ -9,8 +9,17 @@ import com.google.mlkit.vision.text.Text
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+
+private suspend fun <T> com.google.android.gms.tasks.Task<T>.awaitTask(): T =
+    suspendCancellableCoroutine { cont ->
+        addOnSuccessListener { result -> cont.resume(result) }
+        addOnFailureListener { exception -> cont.resumeWithException(exception) }
+        addOnCanceledListener { cont.cancel() }
+    }
 
 data class DetectedTable(
     val title: String,
@@ -56,7 +65,7 @@ class LayoutDetector(
 
         for ((index, uri) in pageUris.withIndex()) {
             val image = InputImage.fromFilePath(context, uri)
-            val visionText = recognizer.process(image).await()
+            val visionText = recognizer.process(image).awaitTask()
             val result = analyzePage(index + 1, visionText)
 
             totalChars += result.textContent.length

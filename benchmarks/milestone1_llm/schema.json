@@ -1,0 +1,127 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "UsmleStep2Quiz",
+  "type": "object",
+  "required": [
+    "quiz_title",
+    "questions"
+  ],
+  "properties": {
+    "quiz_title": {
+      "type": "string",
+      "description": "Title summarizing the clinical domain tested."
+    },
+    "questions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "source_type",
+          "source_label",
+          "subtopic",
+          "vignette",
+          "question_stem",
+          "options",
+          "correct_answer",
+          "explanations"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "source_type": {
+            "type": "string",
+            "enum": [
+              "TEXT",
+              "TABLE",
+              "FIGURE"
+            ]
+          },
+          "source_label": {
+            "type": "string"
+          },
+          "subtopic": {
+            "type": "string"
+          },
+          "vignette": {
+            "type": "string"
+          },
+          "question_stem": {
+            "type": "string"
+          },
+          "options": {
+            "type": "object",
+            "required": [
+              "A",
+              "B",
+              "C",
+              "D",
+              "E"
+            ],
+            "properties": {
+              "A": {
+                "type": "string"
+              },
+              "B": {
+                "type": "string"
+              },
+              "C": {
+                "type": "string"
+              },
+              "D": {
+                "type": "string"
+              },
+              "E": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "correct_answer": {
+            "type": "string",
+            "enum": [
+              "A",
+              "B",
+              "C",
+              "D",
+              "E"
+            ]
+          },
+          "explanations": {
+            "type": "object",
+            "required": [
+              "A",
+              "B",
+              "C",
+              "D",
+              "E"
+            ],
+            "properties": {
+              "A": {
+                "type": "string"
+              },
+              "B": {
+                "type": "string"
+              },
+              "C": {
+                "type": "string"
+              },
+              "D": {
+                "type": "string"
+              },
+              "E": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

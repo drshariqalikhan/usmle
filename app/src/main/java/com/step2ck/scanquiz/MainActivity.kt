@@ -1,0 +1,371 @@
+package com.step2ck.scanquiz
+
+import android.content.Intent
+import android.net.Uri
+import android.os.Bundle
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.lifecycle.lifecycleScope
+import com.step2ck.scanquiz.auth.OpenRouterAuthManager
+import com.step2ck.scanquiz.auth.QuotaInfo
+import com.step2ck.scanquiz.auth.QuotaManager
+import com.step2ck.scanquiz.export.AnkiApkgExporter
+import com.step2ck.scanquiz.llm.OpenRouterClient
+import com.step2ck.scanquiz.quiz.QuizEngine
+import com.step2ck.scanquiz.quiz.QuizScorecard
+import com.step2ck.scanquiz.quiz.data.QuestionEntity
+import com.step2ck.scanquiz.quiz.data.QuizDatabase
+import com.step2ck.scanquiz.quiz.data.QuizEntity
+import com.step2ck.scanquiz.quiz.toQuestionModels
+import com.step2ck.scanquiz.scanner.AggregatedScanSummary
+import com.step2ck.scanquiz.scanner.DocumentScannerManager
+import com.step2ck.scanquiz.scanner.LayoutDetector
+import com.step2ck.scanquiz.ui.screens.*
+import com.step2ck.scanquiz.ui.theme.Step2CKScanQuizTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+enum class AppScreen {
+    HOME,
+    CONFIRMATION,
+    EXAM_PLAYER,
+    SCORECARD,
+    PRO_PAYWALL
+}
+
+class MainActivity : ComponentActivity() {
+
+    private val authManager by lazy { OpenRouterAuthManager(this) }
+    private val quotaManager by lazy { QuotaManager(authManager) }
+    private val scannerManager by lazy { DocumentScannerManager(this) }
+    private val layoutDetector by lazy { LayoutDetector(this) }
+    private val openRouterClient by lazy { OpenRouterClient(authManager, quotaManager) }
+    private val quizEngine by lazy { QuizEngine() }
+    private val database by lazy { QuizDatabase.getInstance(this) }
+    private val ankiExporter by lazy { AnkiApkgExporter(this) }
+
+    private lateinit var docScannerLauncher: ActivityResultLauncher<IntentSenderRequest>
+
+    // Compose State
+    private var currentScreen by mutableStateOf(AppScreen.HOME)
+    private var quotaInfoState by mutableStateOf<QuotaInfo?>(null)
+    private var isProUnlockedState by mutableStateOf(false)
+    private var recentQuizzesState by mutableStateOf<List<QuizEntity>>(emptyList())
+    private var activeScanSummary by mutableStateOf<AggregatedScanSummary?>(null)
+    private var isGeneratingQuiz by mutableStateOf(false)
+    private var activeScorecard by mutableStateOf<QuizScorecard?>(null)
+    private var examTitle by mutableStateOf("USMLE Step 2 CK Examination")
+    private var examQuestions by mutableStateOf<List<com.step2ck.scanquiz.quiz.QuestionModel>>(emptyList())
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        // Register ML Kit Document Scanner result callback
+        docScannerLauncher = registerForActivityResult(
+            ActivityResultContracts.StartIntentSenderForResult()
+        ) { result ->
+            val pageUris = scannerManager.parseResult(result.resultCode, result.data)
+            if (pageUris.isNotEmpty()) {
+                lifecycleScope.launch {
+                    val summary = layoutDetector.processPages(pageUris)
+                    activeScanSummary = summary
+                    currentScreen = AppScreen.CONFIRMATION
+                }
+            }
+        }
+
+        // Handle initial OAuth deep link if launched via intent
+        handleOAuthDeepLink(intent)
+
+        // Observe recent quizzes from Room database
+        lifecycleScope.launch {
+            database.quizDao().getRecentQuizzesFlow(5).collectLatest { list ->
+                recentQuizzesState = list
+            }
+        }
+
+        // Refresh quota pre-check
+        refreshQuota()
+
+        setContent {
+            Step2CKScanQuizTheme {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    when (currentScreen) {
+                        AppScreen.HOME -> HomeScreen(
+                            quotaInfo = quotaInfoState,
+                            isProUnlocked = isProUnlockedState,
+                            recentQuizzes = recentQuizzesState,
+                            onConnectOpenRouter = { startOAuthLogin() },
+                            onStartScan = { launchDocumentScanner() },
+                            onOpenPaywall = { currentScreen = AppScreen.PRO_PAYWALL },
+                            onSelectRecentQuiz = { quizId -> loadSavedQuiz(quizId) }
+                        )
+
+                        AppScreen.CONFIRMATION -> activeScanSummary?.let { summary ->
+                            ConfirmationCardScreen(
+                                summary = summary,
+                                isProUnlocked = isProUnlockedState,
+                                isGenerating = isGeneratingQuiz,
+                                onBack = { currentScreen = AppScreen.HOME },
+                                onGenerateQuiz = { includeTables, includeFigures, questionCount ->
+                                    generateQuiz(summary, includeTables, includeFigures, questionCount)
+                                }
+                            )
+                        } ?: run {
+                            currentScreen = AppScreen.HOME
+                        }
+
+                        AppScreen.EXAM_PLAYER -> ExamPlayerScreen(
+                            quizTitle = examTitle,
+                            questions = examQuestions,
+                            onFinishExam = { gradedQuestions ->
+                                finishAndGradeQuiz(examTitle, gradedQuestions)
+                            }
+                        )
+
+                        AppScreen.SCORECARD -> activeScorecard?.let { scorecard ->
+                            ScorecardScreen(
+                                scorecard = scorecard,
+                                isProUnlocked = isProUnlockedState,
+                                onExportAnki = { exportToAnki(scorecard) },
+                                onReQuizWeakAreas = { requizWeakAreas(scorecard) },
+                                onBackHome = { currentScreen = AppScreen.HOME }
+                            )
+                        } ?: run {
+                            currentScreen = AppScreen.HOME
+                        }
+
+                        AppScreen.PRO_PAYWALL -> ProPaywallScreen(
+                            onBack = { currentScreen = AppScreen.HOME },
+                            onPurchasePro = {
+                                // Simulate one-time purchase success
+                                isProUnlockedState = true
+                                Toast.makeText(this, "Pro Unlocked! Unlimited history and Anki export enabled.", Toast.LENGTH_LONG).show()
+                                currentScreen = AppScreen.HOME
+                            },
+                            onRestorePurchase = {
+                                Toast.makeText(this, "No previous purchases found.", Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        handleOAuthDeepLink(intent)
+    }
+
+    private fun handleOAuthDeepLink(intent: Intent?) {
+        val uri = intent?.data ?: return
+        if (uri.scheme == "step2ck" && uri.host == "oauth-callback") {
+            val code = uri.getQueryParameter("code")
+            if (!code.isNullOrBlank()) {
+                lifecycleScope.launch {
+                    val result = authManager.exchangeCodeForApiKey(code)
+                    if (result.isSuccess) {
+                        Toast.makeText(this@MainActivity, "OpenRouter Connected!", Toast.LENGTH_SHORT).show()
+                        refreshQuota()
+                    } else {
+                        Toast.makeText(this@MainActivity, "OAuth Failed: ${result.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun startOAuthLogin() {
+        val authUri = authManager.createAuthorizationUri()
+        val browserIntent = Intent(Intent.ACTION_VIEW, authUri)
+        startActivity(browserIntent)
+    }
+
+    private fun refreshQuota() {
+        if (!authManager.isConnected()) return
+        lifecycleScope.launch {
+            val res = quotaManager.checkQuota()
+            if (res.isSuccess) {
+                quotaInfoState = res.getOrNull()
+            }
+        }
+    }
+
+    private fun launchDocumentScanner() {
+        if (!authManager.isConnected()) {
+            Toast.makeText(this, "Please connect OpenRouter first.", Toast.LENGTH_SHORT).show()
+            startOAuthLogin()
+            return
+        }
+        scannerManager.getStartScanIntent(
+            onSuccess = { intentSenderRequest ->
+                docScannerLauncher.launch(intentSenderRequest)
+            },
+            onFailure = { e ->
+                Toast.makeText(this, "Scanner Error: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+
+    private fun generateQuiz(
+        summary: AggregatedScanSummary,
+        includeTables: Boolean,
+        includeFigures: Boolean,
+        questionCount: Int
+    ) {
+        isGeneratingQuiz = true
+        lifecycleScope.launch {
+            val result = openRouterClient.generateQuiz(
+                summary = summary,
+                includeTables = includeTables,
+                includeFigures = includeFigures,
+                questionCount = questionCount
+            )
+            isGeneratingQuiz = false
+
+            if (result.isSuccess) {
+                val validatedQuiz = result.getOrThrow()
+                examTitle = validatedQuiz.quizTitle
+                examQuestions = validatedQuiz.toQuestionModels()
+                currentScreen = AppScreen.EXAM_PLAYER
+            } else {
+                Toast.makeText(
+                    this@MainActivity,
+                    "Quiz Generation Error: ${result.exceptionOrNull()?.message}",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
+
+    private fun finishAndGradeQuiz(
+        title: String,
+        gradedQuestions: List<com.step2ck.scanquiz.quiz.QuestionModel>
+    ) {
+        val scorecard = quizEngine.gradeQuiz(title, gradedQuestions)
+        activeScorecard = scorecard
+
+        // Persist to local SQLite Room DB
+        lifecycleScope.launch(Dispatchers.IO) {
+            val quizId = database.quizDao().insertQuiz(
+                QuizEntity(
+                    title = scorecard.quizTitle,
+                    totalQuestions = scorecard.totalQuestions,
+                    correctCount = scorecard.correctCount,
+                    scorePercentage = scorecard.scorePercentage,
+                    isProSession = isProUnlockedState
+                )
+            )
+
+            val questionEntities = scorecard.questions.map { q ->
+                QuestionEntity(
+                    quizId = quizId,
+                    sourceLabel = q.sourceLabel,
+                    sourceType = q.sourceType,
+                    subtopic = q.subtopic,
+                    vignette = q.vignette,
+                    questionStem = q.questionStem,
+                    optionsJson = q.options.joinToString(";") { "${it.letter}:${it.text}" },
+                    correctAnswer = q.correctAnswer,
+                    selectedAnswer = q.selectedAnswer,
+                    isCorrect = q.isCorrect,
+                    explanationsJson = q.options.joinToString(";") { "${it.letter}:${it.explanation}" }
+                )
+            }
+            database.quizDao().insertQuestions(questionEntities)
+        }
+
+        currentScreen = AppScreen.SCORECARD
+    }
+
+    private fun exportToAnki(scorecard: QuizScorecard) {
+        if (!isProUnlockedState) {
+            Toast.makeText(this, "Anki Export is a Pro feature.", Toast.LENGTH_SHORT).show()
+            currentScreen = AppScreen.PRO_PAYWALL
+            return
+        }
+
+        val missed = scorecard.questions.filter { !it.isCorrect }
+        if (missed.isEmpty()) {
+            Toast.makeText(this, "100% Score! No missed questions to export.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        lifecycleScope.launch {
+            val res = ankiExporter.exportMissedQuestionsToAnki(scorecard.quizTitle, missed)
+            if (res.isSuccess) {
+                val file = res.getOrThrow()
+                val shareIntent = ankiExporter.createShareIntent(file)
+                startActivity(Intent.createChooser(shareIntent, "Import into AnkiDroid"))
+            } else {
+                Toast.makeText(this@MainActivity, "Export failed: ${res.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun requizWeakAreas(scorecard: QuizScorecard) {
+        if (!isProUnlockedState) {
+            currentScreen = AppScreen.PRO_PAYWALL
+            return
+        }
+        val missed = scorecard.questions.filter { !it.isCorrect }
+        if (missed.isEmpty()) return
+        examTitle = "Re-Quiz: Weak Areas (${scorecard.quizTitle})"
+        examQuestions = missed.map { it.copy(selectedAnswer = null) }
+        currentScreen = AppScreen.EXAM_PLAYER
+    }
+
+    private fun loadSavedQuiz(quizId: Long) {
+        lifecycleScope.launch {
+            val questions = withContext(Dispatchers.IO) {
+                database.quizDao().getQuestionsForQuiz(quizId)
+            }
+            if (questions.isNotEmpty()) {
+                val models = questions.map { q ->
+                    val opts = q.optionsJson.split(";").mapNotNull { part ->
+                        val tokens = part.split(":", limit = 2)
+                        if (tokens.size == 2) {
+                            com.step2ck.scanquiz.quiz.OptionItem(
+                                letter = tokens[0],
+                                text = tokens[1],
+                                explanation = ""
+                            )
+                        } else null
+                    }
+                    com.step2ck.scanquiz.quiz.QuestionModel(
+                        id = q.id.toInt(),
+                        sourceType = q.sourceType,
+                        sourceLabel = q.sourceLabel,
+                        subtopic = q.subtopic,
+                        vignette = q.vignette,
+                        questionStem = q.questionStem,
+                        options = opts,
+                        correctAnswer = q.correctAnswer,
+                        selectedAnswer = q.selectedAnswer
+                    )
+                }
+                activeScorecard = quizEngine.gradeQuiz("Past Quiz Review", models)
+                currentScreen = AppScreen.SCORECARD
+            }
+        }
+    }
+}
+

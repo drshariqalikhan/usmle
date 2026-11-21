@@ -1,5 +1,6 @@
 package com.step2ck.scanquiz.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -23,6 +24,7 @@ fun ConfirmationCardScreen(
     summary: AggregatedScanSummary,
     isProUnlocked: Boolean,
     isGenerating: Boolean,
+    isPrefetching: Boolean,
     onBack: () -> Unit,
     onGenerateQuiz: (includeTables: Boolean, includeFigures: Boolean, questionCount: Int) -> Unit
 ) {
@@ -193,7 +195,29 @@ fun ConfirmationCardScreen(
 
                 Spacer(Modifier.weight(1f))
 
-                // 4. Generate Quiz CTA Button (Triggers single OpenRouter call)
+                // Prefetch status indicator
+                AnimatedVisibility(visible = isPrefetching && !isGenerating) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            Text(
+                                text = "Quiz is being prepared in background…",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    }
+                }
+
+                // 4. Generate Quiz CTA Button (Triggers single OpenRouter call) (Triggers single OpenRouter call)
                 Button(
                     onClick = {
                         onGenerateQuiz(includeTables, includeFigures, selectedQuestionCount)

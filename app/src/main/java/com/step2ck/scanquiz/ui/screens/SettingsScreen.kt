@@ -32,6 +32,8 @@ import kotlinx.coroutines.launch
 fun SettingsScreen(
     authManager: OpenRouterAuthManager,
     quotaManager: QuotaManager,
+    isTestModePro: Boolean,
+    onToggleTestModePro: (Boolean) -> Unit,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -201,7 +203,54 @@ fun SettingsScreen(
                 }
             }
 
-            // 2. Model Configuration Card
+            // 2. Test Mode Pro Card (dev-only toggle)
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isTestModePro) Color(0xFF7C3AED) else MaterialTheme.colorScheme.surface
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("\u26A0\uFE0F ", fontSize = 16.sp)
+                                Text(
+                                    text = "TEST MODE: Pro Features",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp,
+                                    color = if (isTestModePro) Color.White else MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = if (isTestModePro)
+                                    "\u2705 Pro ACTIVE \u2014 Anki export, re-quiz & 10-question mode unlocked"
+                                else
+                                    "Dev only. Unlocks all Pro features without payment for testing.",
+                                fontSize = 11.sp,
+                                color = if (isTestModePro) Color(0xFFE9D5FF) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                            )
+                        }
+                        Switch(
+                            checked = isTestModePro,
+                            onCheckedChange = { onToggleTestModePro(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = Color(0xFF5B21B6)
+                            )
+                        )
+                    }
+                }
+            }
+
+            // 3. Model Configuration Card
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),

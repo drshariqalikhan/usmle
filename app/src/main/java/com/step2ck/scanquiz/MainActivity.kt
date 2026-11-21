@@ -30,8 +30,10 @@ import androidx.lifecycle.lifecycleScope
 import com.step2ck.scanquiz.auth.OpenRouterAuthManager
 import com.step2ck.scanquiz.auth.QuotaInfo
 import com.step2ck.scanquiz.auth.QuotaManager
+import com.step2ck.scanquiz.debug.AppLogger
 import com.step2ck.scanquiz.export.AnkiApkgExporter
 import com.step2ck.scanquiz.llm.OpenRouterClient
+import com.step2ck.scanquiz.llm.ValidatedQuiz
 import com.step2ck.scanquiz.quiz.QuizEngine
 import com.step2ck.scanquiz.quiz.QuizScorecard
 import com.step2ck.scanquiz.quiz.data.QuestionEntity
@@ -44,6 +46,7 @@ import com.step2ck.scanquiz.scanner.LayoutDetector
 import com.step2ck.scanquiz.ui.screens.*
 import com.step2ck.scanquiz.ui.theme.Step2CKScanQuizTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -74,6 +77,7 @@ class MainActivity : ComponentActivity() {
     private var currentScreen by mutableStateOf(AppScreen.HOME)
     private var quotaInfoState by mutableStateOf<QuotaInfo?>(null)
     private var isProUnlockedState by mutableStateOf(false)
+    private var isTestModePro by mutableStateOf(false)
     private var recentQuizzesState by mutableStateOf<List<QuizEntity>>(emptyList())
     private var activeScanSummary by mutableStateOf<AggregatedScanSummary?>(null)
     private var isGeneratingQuiz by mutableStateOf(false)
@@ -81,6 +85,11 @@ class MainActivity : ComponentActivity() {
     private var examTitle by mutableStateOf("USMLE Step 2 CK Examination")
     private var examQuestions by mutableStateOf<List<com.step2ck.scanquiz.quiz.QuestionModel>>(emptyList())
     private var activeErrorDetails by mutableStateOf<String?>(null)
+
+    // Background prefetch state
+    private var prefetchJob: Job? = null
+    private var prefetchResult by mutableStateOf<Result<ValidatedQuiz>?>(null)
+    private var isPrefetching by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -95,6 +104,8 @@ class MainActivity : ComponentActivity() {
                     val summary = layoutDetector.processPages(pageUris)
                     activeScanSummary = summary
                     currentScreen = AppScreen.CONFIRMATION
+                    // Start background prefetch immediately with default settings
+                    startPrefetch(summary)
                 }
             }
         }
@@ -138,6 +149,11 @@ class MainActivity : ComponentActivity() {
                         AppScreen.SETTINGS -> SettingsScreen(
                             authManager = authManager,
                             quotaManager = quotaManager,
+                            isTestModePro = isTestModePro,
+                            onToggleTestModePro = { enabled ->
+                                isTestModePro = enabled
+                                AppLogger.d("SETTINGS", "Test Mode Pro = $enabled")
+                            },
                             onBack = {
                                 refreshQuota()
                                 currentScreen = AppScreen.HOME
@@ -147,9 +163,16 @@ class MainActivity : ComponentActivity() {
                         AppScreen.CONFIRMATION -> activeScanSummary?.let { summary ->
                             ConfirmationCardScreen(
                                 summary = summary,
-                                isProUnlocked = isProUnlockedState,
+                                isProUnlocked = isProUnlockedState || isTestModePro,
                                 isGenerating = isGeneratingQuiz,
-                                onBack = { currentScreen = AppScreen.HOME },
+                                isPrefetching = isPrefetching,
+                                onBack = {
+                                    // Cancel any running prefetch when user goes back
+                                    prefetchJob?.cancel()
+                                    prefetchResult = null
+                                    isPrefetching = false
+                                    currentScreen = AppScreen.HOME
+                                },
                                 onGenerateQuiz = { includeTables, includeFigures, questionCount ->
                                     generateQuiz(summary, includeTables, includeFigures, questionCount)
                                 }
@@ -169,7 +192,7 @@ class MainActivity : ComponentActivity() {
                         AppScreen.SCORECARD -> activeScorecard?.let { scorecard ->
                             ScorecardScreen(
                                 scorecard = scorecard,
-                                isProUnlocked = isProUnlockedState,
+                                isProUnlocked = isProUnlockedState || isTestModePro,
                                 onExportAnki = { exportToAnki(scorecard) },
                                 onReQuizWeakAreas = { requizWeakAreas(scorecard) },
                                 onBackHome = { currentScreen = AppScreen.HOME }
@@ -313,6 +336,26 @@ class MainActivity : ComponentActivity() {
         includeFigures: Boolean,
         questionCount: Int
     ) {
+        // Check if prefetch already finished with matching defaults (tables=true, figures=true, 5q)
+        val cached = prefetchResult
+        val matchesDefaults = includeTables && includeFigures && questionCount == 5
+        if (cached != null && matchesDefaults) {
+            AppLogger.d("PREFETCH", "Using cached prefetch result instantly!")
+            prefetchJob?.cancel()
+            prefetchResult = null
+            isPrefetching = false
+            handleQuizResult(cached)
+            return
+        }
+
+        // Cancel running prefetch — user chose different settings or prefetch wasn't ready
+        if (prefetchJob?.isActive == true) {
+            AppLogger.d("PREFETCH", "User settings differ from prefetch defaults — cancelling prefetch, doing fresh call.")
+            prefetchJob?.cancel()
+            prefetchResult = null
+            isPrefetching = false
+        }
+
         isGeneratingQuiz = true
         lifecycleScope.launch {
             val result = openRouterClient.generateQuiz(
@@ -322,15 +365,44 @@ class MainActivity : ComponentActivity() {
                 questionCount = questionCount
             )
             isGeneratingQuiz = false
+            handleQuizResult(result)
+        }
+    }
 
+    private fun handleQuizResult(result: Result<ValidatedQuiz>) {
+        if (result.isSuccess) {
+            val validatedQuiz = result.getOrThrow()
+            examTitle = validatedQuiz.quizTitle
+            examQuestions = validatedQuiz.toQuestionModels()
+            currentScreen = AppScreen.EXAM_PLAYER
+        } else {
+            val errMsg = result.exceptionOrNull()?.message ?: "Unknown error"
+            activeErrorDetails = errMsg
+        }
+    }
+
+    /** Starts a background coroutine that fires the LLM call with default settings.
+     *  Result is cached in [prefetchResult] and consumed instantly when the user taps Generate
+     *  with matching settings (tables=on, figures=on, 5 questions). */
+    private fun startPrefetch(summary: AggregatedScanSummary) {
+        prefetchJob?.cancel()
+        prefetchResult = null
+        isPrefetching = true
+        prefetchJob = lifecycleScope.launch {
+            AppLogger.d("PREFETCH", "Background quiz prefetch started (defaults: tables=on, figures=on, 5q)…")
+            val result = openRouterClient.generateQuiz(
+                summary = summary,
+                includeTables = true,
+                includeFigures = true,
+                questionCount = 5
+            )
+            isPrefetching = false
+            prefetchResult = result
             if (result.isSuccess) {
-                val validatedQuiz = result.getOrThrow()
-                examTitle = validatedQuiz.quizTitle
-                examQuestions = validatedQuiz.toQuestionModels()
-                currentScreen = AppScreen.EXAM_PLAYER
+                AppLogger.d("PREFETCH", "Prefetch complete! Quiz ready to display instantly.")
             } else {
-                val errMsg = result.exceptionOrNull()?.message ?: "Unknown error"
-                activeErrorDetails = errMsg
+                AppLogger.e("PREFETCH", "Prefetch failed: ${result.exceptionOrNull()?.message}")
+                // Don't show error — user will retry by tapping Generate normally
             }
         }
     }
@@ -350,7 +422,7 @@ class MainActivity : ComponentActivity() {
                     totalQuestions = scorecard.totalQuestions,
                     correctCount = scorecard.correctCount,
                     scorePercentage = scorecard.scorePercentage,
-                    isProSession = isProUnlockedState
+                    isProSession = isProUnlockedState || isTestModePro
                 )
             )
 
@@ -376,7 +448,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun exportToAnki(scorecard: QuizScorecard) {
-        if (!isProUnlockedState) {
+        if (!isProUnlockedState && !isTestModePro) {
             Toast.makeText(this, "Anki Export is a Pro feature.", Toast.LENGTH_SHORT).show()
             currentScreen = AppScreen.PRO_PAYWALL
             return
@@ -401,7 +473,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requizWeakAreas(scorecard: QuizScorecard) {
-        if (!isProUnlockedState) {
+        if (!isProUnlockedState && !isTestModePro) {
             currentScreen = AppScreen.PRO_PAYWALL
             return
         }

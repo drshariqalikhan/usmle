@@ -113,6 +113,11 @@ class MainActivity : ComponentActivity() {
                             isProUnlocked = isProUnlockedState,
                             recentQuizzes = recentQuizzesState,
                             onConnectOpenRouter = { startOAuthLogin() },
+                            onSaveManualApiKey = { key ->
+                                authManager.saveApiKey(key)
+                                Toast.makeText(this@MainActivity, "OpenRouter API Key saved!", Toast.LENGTH_SHORT).show()
+                                refreshQuota()
+                            },
                             onStartScan = { launchDocumentScanner() },
                             onOpenPaywall = { currentScreen = AppScreen.PRO_PAYWALL },
                             onSelectRecentQuiz = { quizId -> loadSavedQuiz(quizId) }

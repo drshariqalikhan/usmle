@@ -29,10 +29,64 @@ fun HomeScreen(
     isProUnlocked: Boolean,
     recentQuizzes: List<QuizEntity>,
     onConnectOpenRouter: () -> Unit,
+    onSaveManualApiKey: (String) -> Unit = {},
     onStartScan: () -> Unit,
     onOpenPaywall: () -> Unit,
     onSelectRecentQuiz: (Long) -> Unit
 ) {
+    var showKeyDialog by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var inputKey by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
+
+    if (showKeyDialog) {
+        AlertDialog(
+            onDismissRequest = { showKeyDialog = false },
+            title = { Text("Connect OpenRouter") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "Sign in automatically via browser, or paste your OpenRouter API key directly below.",
+                        fontSize = 13.sp
+                    )
+                    Button(
+                        onClick = {
+                            showKeyDialog = false
+                            onConnectOpenRouter()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Sign In with OpenRouter (Browser)")
+                    }
+                    Divider()
+                    OutlinedTextField(
+                        value = inputKey,
+                        onValueChange = { inputKey = it },
+                        label = { Text("Paste API Key (sk-or-v1-...)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (inputKey.isNotBlank()) {
+                            onSaveManualApiKey(inputKey.trim())
+                            showKeyDialog = false
+                        }
+                    },
+                    enabled = inputKey.isNotBlank()
+                ) {
+                    Text("Save Key")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showKeyDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -121,7 +175,7 @@ fun HomeScreen(
                                     fontSize = 14.sp
                                 )
                             } else {
-                                TextButton(onClick = onConnectOpenRouter) {
+                                TextButton(onClick = { showKeyDialog = true }) {
                                     Text("Connect Key", fontSize = 12.sp)
                                 }
                             }

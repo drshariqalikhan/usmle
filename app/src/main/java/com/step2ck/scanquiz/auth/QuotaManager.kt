@@ -89,8 +89,9 @@ class QuotaManager(
             val rateLimitObj = data.optJSONObject("rate_limit")
             val requestsPerMin = rateLimitObj?.optInt("requests", 20) ?: 20
 
-            // Estimate daily remaining based on standard 50 reqs/day
-            val dailyRemaining = if (isFreeTier) 50 else 999
+            val freeReqs = data.optJSONObject("free_model_daily_requests")
+            val dailyRemaining = freeReqs?.optInt("remaining", if (isFreeTier) 50 else 999) ?: (if (isFreeTier) 50 else 999)
+            val dailyLimit = freeReqs?.optInt("limit", 50) ?: 50
 
             Result.success(
                 QuotaInfo(
@@ -100,6 +101,7 @@ class QuotaManager(
                     usage = usage,
                     isFreeTier = isFreeTier,
                     rateLimitRequestsPerMin = requestsPerMin,
+                    dailyLimitRequests = dailyLimit,
                     dailyRemaining = dailyRemaining
                 )
             )

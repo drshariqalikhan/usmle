@@ -52,6 +52,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 enum class AppScreen {
+    SPLASH,
     HOME,
     CONFIRMATION,
     EXAM_PLAYER,
@@ -74,7 +75,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var docScannerLauncher: ActivityResultLauncher<IntentSenderRequest>
 
     // Compose State
-    private var currentScreen by mutableStateOf(AppScreen.HOME)
+    private var currentScreen by mutableStateOf(AppScreen.SPLASH)
+    private var splashPhase by mutableStateOf<SplashPhase>(SplashPhase.Connecting)
     private var quotaInfoState by mutableStateOf<QuotaInfo?>(null)
     private var isProUnlockedState by mutableStateOf(false)
     private var isTestModePro by mutableStateOf(false)
@@ -120,8 +122,8 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Refresh quota pre-check
-        refreshQuota()
+        // Check connection on splash launch
+        checkConnectionOnSplash()
 
         setContent {
             Step2CKScanQuizTheme {
@@ -130,6 +132,23 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     when (currentScreen) {
+                        AppScreen.SPLASH -> SplashScreen(
+                            phase = splashPhase,
+                            onRetryConnect = { checkConnectionOnSplash() },
+                            onPasteKey = { key ->
+                                if (key.isNotBlank()) {
+                                    authManager.saveApiKey(key)
+                                    Toast.makeText(this@MainActivity, "Key saved! Verifying...", Toast.LENGTH_SHORT).show()
+                                    checkConnectionOnSplash()
+                                } else {
+                                    authManager.clearAuth()
+                                    splashPhase = SplashPhase.NoKey
+                                }
+                            },
+                            onOpenRouterGuide = { startOAuthLogin() },
+                            onContinue = { currentScreen = AppScreen.HOME }
+                        )
+
                         AppScreen.HOME -> HomeScreen(
                             quotaInfo = quotaInfoState,
                             isProUnlocked = isProUnlockedState,
@@ -289,11 +308,37 @@ class MainActivity : ComponentActivity() {
                     val result = authManager.exchangeCodeForApiKey(code)
                     if (result.isSuccess) {
                         Toast.makeText(this@MainActivity, "OpenRouter Connected!", Toast.LENGTH_SHORT).show()
-                        refreshQuota()
+                        if (currentScreen == AppScreen.SPLASH) {
+                            checkConnectionOnSplash()
+                        } else {
+                            refreshQuota()
+                        }
                     } else {
-                        Toast.makeText(this@MainActivity, "OAuth Failed: ${result.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
+                        val err = result.exceptionOrNull()?.message ?: "Unknown error"
+                        Toast.makeText(this@MainActivity, "OAuth Failed: $err", Toast.LENGTH_LONG).show()
+                        if (currentScreen == AppScreen.SPLASH) {
+                            splashPhase = SplashPhase.KeyError(err)
+                        }
                     }
                 }
+            }
+        }
+    }
+
+    private fun checkConnectionOnSplash() {
+        if (!authManager.isConnected()) {
+            splashPhase = SplashPhase.NoKey
+            return
+        }
+        splashPhase = SplashPhase.Connecting
+        lifecycleScope.launch {
+            val res = quotaManager.checkQuota()
+            if (res.isSuccess) {
+                quotaInfoState = res.getOrNull()
+                splashPhase = SplashPhase.ReadyConnected
+            } else {
+                val err = res.exceptionOrNull()?.message ?: "Failed to verify OpenRouter key"
+                splashPhase = SplashPhase.KeyError(err)
             }
         }
     }

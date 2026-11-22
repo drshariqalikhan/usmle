@@ -36,15 +36,14 @@ class OpenRouterClient(
     companion object {
         private const val API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-        // Reliable fallback chain for OpenRouter free tier models (updated Nov 2026)
-        // Source: openrouter.ai/models?max_price=0
+        // Reliable fallback chain for OpenRouter free tier models
+        // openrouter/free is placed first as it dynamically routes to currently active free models
         val DEFAULT_FREE_MODELS = listOf(
-            "nvidia/llama-3.3-nemotron-super-49b-v1:free",   // NVIDIA — fast, reliable
-            "google/gemma-3-27b-it:free",                     // Google Gemma 3
-            "qwen/qwen3-14b:free",                            // Qwen 3 — good at structured JSON
-            "meta-llama/llama-3.1-8b-instruct:free",          // Meta — small but quick
-            "mistralai/mistral-7b-instruct:free",             // Mistral — broad support
-            "openrouter/free"                                  // Meta-router — always last resort
+            "openrouter/free",                               // Primary: Meta-router to active free models
+            "google/gemma-3-27b-it:free",
+            "qwen/qwen3-14b:free",
+            "meta-llama/llama-3.1-8b-instruct:free",
+            "mistralai/mistral-7b-instruct:free"
         )
     }
 
